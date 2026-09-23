@@ -97,12 +97,20 @@ jobs:
           echo "ran=true" >> "$GITHUB_OUTPUT"
 
       - name: SARIF export
+        id: sarif
         run: |
           ARGS="--phase2 security-reports/phase2/security-report.json"
           if [ "${{ steps.phase3.outputs.ran }}" = "true" ]; then
             ARGS="$ARGS --phase3 security-reports/phase3/runtime-security-report.json --runtime-anchor project/.github/workflows/security-ci.yml"
           fi
           security-ci sarif $ARGS --sarif security-reports/security.sarif
+          # Only mark success when the export exited 0 (bash -e) and wrote a non-empty SARIF file.
+          if [ -s security-reports/security.sarif ]; then
+            echo "created=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::error title=SARIF export::security-reports/security.sarif was not created"
+            exit 1
+          fi
 
       - name: Upload reports
         if: always()
@@ -113,8 +121,9 @@ jobs:
           retention-days: 30
 
       - name: Upload SARIF to code scanning
-        if: always()
-        uses: github/codeql-action/upload-sarif@v3
+        # Runs only when the SARIF export step produced the file (not unconditionally).
+        if: ${{ !cancelled() && steps.sarif.outputs.created == 'true' }}
+        uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: security-reports/security.sarif
           category: vibe-code-engineering-security
